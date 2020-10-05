@@ -20,16 +20,16 @@ with open(os.path.join('docs', 'release-notes.rst')) as f:
 
 setup(
     name="redis-py-cluster",
-    version="2.1.0",
+    version="2.1.0.reddit_patched",
     description="Library for communicating with Redis Clusters. Built on top of redis-py lib",
     long_description=readme + '\n\n' + history,
     long_description_content_type="text/markdown",
     author="Johan Andersson",
-    author_email="Grokzen@gmail.com",
+    author_email="kefu.du@reddit.com",
     maintainer='Johan Andersson',
     maintainer_email='Grokzen@gmail.com',
     packages=["rediscluster"],
-    url='http://github.com/grokzen/redis-py-cluster',
+    url='http://github.com/duke-cliff/redis-py-cluster',
     license='MIT',
     install_requires=[
         'redis>=3.0.0,<4.0.0'
