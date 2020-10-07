@@ -30,7 +30,7 @@ setup(
     maintainer_email='Grokzen@gmail.com',
     packages=["rediscluster"],
     url='http://github.com/grokzen/redis-py-cluster',
-    download_url="https://github.com/duke-cliff/redis-py-cluster/archive/2.1.0.999.2.tar.gz",
+    download_url="https://github.com/duke-cliff/redis-py-cluster/archive/2.1.0.999.3.tar.gz",
     license='MIT',
     install_requires=[
         'redis>=3.0.0,<4.0.0'
