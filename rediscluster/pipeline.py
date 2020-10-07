@@ -187,6 +187,8 @@ class ClusterPipeline(RedisCluster):
 
         # build a list of node objects based on node names we need to
         nodes = {}
+        node_by_slot = {}
+        connection_by_node = {}
 
         # as we move through each command that still needs to be processed,
         # we figure out the slot number that command maps to, then from the slot determine the node.
@@ -194,16 +196,25 @@ class ClusterPipeline(RedisCluster):
             # refer to our internal node -> slot table that tells us where a given
             # command should route to.
             slot = self._determine_slot(*c.args)
-            node = self.connection_pool.get_node_by_slot(slot, self.read_from_replicas)
 
-            # little hack to make sure the node name is populated. probably could clean this up.
-            self.connection_pool.nodes.set_node_name(node)
+            if slot in node_by_slot:
+                node = node_by_slot[slot]
+            else:
+                node = self.connection_pool.get_node_by_slot(slot, self.read_from_replicas)
+                node_by_slot[slot] = node
+
+                # little hack to make sure the node name is populated. probably could clean this up.
+                self.connection_pool.nodes.set_node_name(node)
 
             # now that we know the name of the node ( it's just a string in the form of host:port )
             # we can build a list of commands for each node.
             node_name = node['name']
             if node_name not in nodes:
-                nodes[node_name] = NodeCommands(self.parse_response, self.connection_pool.get_connection_by_node(node))
+                if node_name in connection_by_node:
+                    connection = connection_by_node[node_name]
+                else:
+                    connection = self.connection_pool.get_connection_by_node(node)
+                nodes[node_name] = NodeCommands(self.parse_response, connection)
 
             nodes[node_name].append(c)
 
@@ -230,8 +241,8 @@ class ClusterPipeline(RedisCluster):
         # next time we read from it we pass the buffered result back from a previous
         # command and every single request after to that connection will always get
         # a mismatched result. (not just theoretical, I saw this happen on production x.x).
-        for n in nodes.values():
-            self.connection_pool.release(n.connection)
+        for conn in connection_by_node.values():
+            self.connection_pool.release(conn)
 
         # if the response isn't an exception it is a valid response from the node
         # we're all done with that command, YAY!
