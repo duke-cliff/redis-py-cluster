@@ -680,8 +680,8 @@ class RedisCluster(Redis):
                 self.refresh_table_asap = True
                 self.connection_pool.nodes.increment_reinitialize_counter()
 
-                node = self.connection_pool.nodes.set_node(e.host, e.port, server_type='master')
-                self.connection_pool.nodes.slots[e.slot_id][0] = node
+                node = self.connection_pool.nodes.get_node(e.host, e.port, server_type='master')
+                self.connection_pool.nodes.move_slot_to_node(e.slot_id, node)
             except TryAgainError as e:
                 log.exception("TryAgainError")
 
