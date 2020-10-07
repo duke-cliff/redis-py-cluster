@@ -187,7 +187,7 @@ class ClusterPipeline(RedisCluster):
 
         # build a list of node objects based on node names we need to
         nodes = {}
-        node_by_slot = {}
+        proxy_node_by_master = {}
         connection_by_node = {}
 
         # as we move through each command that still needs to be processed,
@@ -197,11 +197,13 @@ class ClusterPipeline(RedisCluster):
             # command should route to.
             slot = self._determine_slot(*c.args)
 
-            if slot in node_by_slot:
-                node = node_by_slot[slot]
+            master_node = self.connection_pool.get_node_by_slot(slot)
+
+            if master_node['name'] in proxy_node_by_master:
+                node = proxy_node_by_master[master_node['name']]
             else:
                 node = self.connection_pool.get_node_by_slot(slot, self.read_from_replicas)
-                node_by_slot[slot] = node
+                proxy_node_by_master[master_node['name']] = node
 
                 # little hack to make sure the node name is populated. probably could clean this up.
                 self.connection_pool.nodes.set_node_name(node)
