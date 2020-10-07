@@ -605,7 +605,6 @@ class RedisCluster(Redis):
                             slot,
                             self.read_from_replicas and (command in self.READ_COMMANDS)
                         )
-                        is_read_replica = node['server_type'] == 'slave'
 
                     connection = self.connection_pool.get_connection_by_node(node)
 

@@ -214,6 +214,7 @@ class ClusterPipeline(RedisCluster):
                     connection = connection_by_node[node_name]
                 else:
                     connection = self.connection_pool.get_connection_by_node(node)
+                    connection_by_node[node_name] = connection
                 nodes[node_name] = NodeCommands(self.parse_response, connection)
 
             nodes[node_name].append(c)
