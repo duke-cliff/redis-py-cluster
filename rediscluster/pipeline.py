@@ -38,6 +38,7 @@ class ClusterPipeline(RedisCluster):
         self.result_callbacks = result_callbacks or self.__class__.RESULT_CALLBACKS.copy()
         self.startup_nodes = startup_nodes if startup_nodes else []
         self.read_from_replicas = read_from_replicas
+        self.read_only_pipeline = read_from_replicas
         self.nodes_flags = self.__class__.NODES_FLAGS.copy()
         self.response_callbacks = dict_merge(response_callbacks or self.__class__.RESPONSE_CALLBACKS.copy(),
                                              self.CLUSTER_COMMANDS_RESPONSE_CALLBACKS)
@@ -202,8 +203,8 @@ class ClusterPipeline(RedisCluster):
             if master_node['name'] in proxy_node_by_master:
                 node = proxy_node_by_master[master_node['name']]
             else:
-                node = self.connection_pool.get_node_by_slot(slot, self.read_from_replicas)
-                log.debug("get proxy node {} for read_from_replicas: {}".format(node['name'], self.read_from_replicas))
+                node = self.connection_pool.get_node_by_slot(slot, self.read_only_pipeline)
+                log.debug("get proxy node {} for read_only_pipeline: {}".format(node['name'], self.read_only_pipeline))
                 proxy_node_by_master[master_node['name']] = node
 
                 # little hack to make sure the node name is populated. probably could clean this up.
