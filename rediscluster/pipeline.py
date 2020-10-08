@@ -216,7 +216,7 @@ class ClusterPipeline(RedisCluster):
 
             nodes[node_name].append(c)
 
-        return nodes
+        return nodes, connection_by_node
 
     def _execute_single_command(self, cmd):
         try:
@@ -237,7 +237,7 @@ class ClusterPipeline(RedisCluster):
         attempt = sorted(stack, key=lambda x: x.position)
 
         # build a list of node objects based on node names we need to
-        nodes = self._get_commands_by_node(attempt)
+        nodes, connection_by_node = self._get_commands_by_node(attempt)
 
         # send the commands in sequence.
         # we  write to all the open sockets for each node first, before reading anything
