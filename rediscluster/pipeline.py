@@ -193,8 +193,11 @@ class ClusterPipeline(RedisCluster):
             # refer to our internal node -> slot table that tells us where a given
             # command should route to.
             slot = self._determine_slot(*c.args)
+            log.debug("determin slot {} for command: {}".format(slot, str(c.args)))
 
             master_node = self.connection_pool.get_node_by_slot(slot)
+
+            log.debug("master node {} for command: {}".format(master_node['name'], str(c.args)))
 
             if master_node['name'] in proxy_node_by_master:
                 node = proxy_node_by_master[master_node['name']]
@@ -206,6 +209,8 @@ class ClusterPipeline(RedisCluster):
                 self.connection_pool.nodes.set_node_name(node)
 
             node_name = node['name']
+            log.debug("proxy node {} for command: {}".format(node_name, str(c.args)))
+
             if node_name not in nodes:
                 if node_name in connection_by_node:
                     connection = connection_by_node[node_name]
@@ -274,12 +279,12 @@ class ClusterPipeline(RedisCluster):
             for c in cmds:
                 if isinstance(c.result, MovedError):
                     e = c.result
-                    log.debug("command {} should redirect to {}:{}, executed on: {}".format(
-                        str(c.args), e.host, e.port, c.node,
-                    ))
+                    # log.debug("command {} should redirect to {}:{}, executed on: {}".format(
+                    #     str(c.args), e.host, e.port, c.node,
+                    # ))
                     node = self.connection_pool.nodes.get_node(e.host, e.port, server_type='master')
                     self.connection_pool.nodes.move_slot_to_node(e.slot_id, node)
-                    c.node = None
+                    log.debug("set slot:{} with the new node {}".format(e.slot_id, node))
 
                     moved_cmds.append(c)
 
