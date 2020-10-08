@@ -415,9 +415,10 @@ class NodeManager(object):
 
     def get_node(self, host, port, server_type=None):
         node, node_name = self.make_node_obj(host, port, server_type)
-        if node_name not in self.nodes:
-            self.nodes[node_name] = node
-        return self.nodes[node_name]
+        # if node_name not in self.nodes:
+        self.nodes[node_name] = node
+
+        return node
 
     def move_slot_to_node(self, slot, node):
         node_name = node['name']

@@ -274,8 +274,12 @@ class ClusterPipeline(RedisCluster):
             for c in cmds:
                 if isinstance(c.result, MovedError):
                     e = c.result
+                    log.debug("command {} should redirect to {}:{}, executed on: {}".format(
+                        str(c.args), e.host, e.port, c.node,
+                    ))
                     node = self.connection_pool.nodes.get_node(e.host, e.port, server_type='master')
                     self.connection_pool.nodes.move_slot_to_node(e.slot_id, node)
+                    c.node = None
 
                     moved_cmds.append(c)
 
