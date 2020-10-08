@@ -250,11 +250,15 @@ class ClusterPipeline(RedisCluster):
             # so that we can read them all in parallel as they come back.
             # we dont' multiplex on the sockets as they come available, but that shouldn't make too much difference.
             node_commands = nodes.values()
-            events = []
+            # events = []
             for n in node_commands:
-                events.append(gevent.spawn(self._execute_node_commands, n))
+                # events.append(gevent.spawn(self._execute_node_commands, n))
+                n.write()
 
-            gevent.joinall(events)
+            for n in node_commands:
+                n.read()
+
+            #gevent.joinall(events)
 
             # release all of the redis connections we allocated earlier back into the connection pool.
             # we used to do this step as part of a try/finally block, but it is really dangerous to
@@ -307,16 +311,20 @@ class ClusterPipeline(RedisCluster):
                 # flag to rebuild the slots table from scratch. So MOVED errors should
                 # correct themselves fairly quickly.
 
-                log.debug("pipeline has failed commands: {}".format([c.result for c in attempt]))
+                log.info("pipeline in slow mode to execute failed commands: {}".format([c.result for c in attempt]))
 
                 self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
-                events = []
+                # events = []
                 for c in attempt:
-                    events.append(gevent.spawn(self._execute_single_command, c))
-                gevent.joinall(events)
-                break
-            else:
-                break
+                    try:
+                        # send each command individually like we do in the main client.
+                        c.result = super(ClusterPipeline, self).execute_command(*c.args, **c.options)
+                    except RedisError as e:
+                        c.result = e
+                    # events.append(gevent.spawn(self._execute_single_command, c))
+                # gevent.joinall(events)
+
+            break
 
         # turn the response back into a simple flat array that corresponds
         # to the sequence of commands issued in the stack in pipeline.execute()
