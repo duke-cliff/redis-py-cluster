@@ -204,7 +204,7 @@ class NodeManager(object):
         """
         Init the slots cache by asking all startup nodes what the current cluster configuration is
         """
-        log.debug("Running initialize on NodeManager")
+        log.info("Running initialize on NodeManager")
         log.debug("Original startup nodes configuration")
         log.debug(json.dumps(self.orig_startup_nodes, indent=2))
 

@@ -282,6 +282,8 @@ class ClusterPipeline(RedisCluster):
             if moved_cmds:
                 cur_attempt += 1
                 cmds = sorted(moved_cmds, key=lambda x: x.position)
+                log.info("retry moved commands #{}: {}".format(cur_attempt, len(cmds)))
+                log.info("first moved command: {}: {}".format(str(cmds[0].args), cmds[0].result))
                 continue
 
             break
@@ -308,8 +310,9 @@ class ClusterPipeline(RedisCluster):
             # If a lot of commands have failed, we'll be setting the
             # flag to rebuild the slots table from scratch. So MOVED errors should
             # correct themselves fairly quickly.
-
-            log.info("pipeline in slow mode to execute failed commands: {}".format([c.result for c in attempt]))
+            log.info("pipeline in slow mode to execute failed commands: {}".format(
+                ["{} has error {}".format(str(c.args), c.result) for c in attempt]
+            ))
 
             self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
             events = []

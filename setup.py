@@ -20,7 +20,7 @@ with open(os.path.join('docs', 'release-notes.rst')) as f:
 
 setup(
     name="redis-py-cluster-patched",
-    version="2.1.0.999.14",
+    version="2.1.0.999.15",
     description="Library for communicating with Redis Clusters. Built on top of redis-py lib",
     long_description=readme + '\n\n' + history,
     long_description_content_type="text/markdown",
@@ -30,7 +30,7 @@ setup(
     maintainer_email='Grokzen@gmail.com',
     packages=["rediscluster"],
     url='http://github.com/grokzen/redis-py-cluster',
-    download_url="https://github.com/duke-cliff/redis-py-cluster/archive/2.1.0.999.14.tar.gz",
+    download_url="https://github.com/duke-cliff/redis-py-cluster/archive/2.1.0.999.15.tar.gz",
     license='MIT',
     install_requires=[
         'redis>=3.0.0,<4.0.0',
