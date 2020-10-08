@@ -236,7 +236,7 @@ class ClusterPipeline(RedisCluster):
         # if we have to run through it again, we only retry the commands that failed.
         cmds = sorted(stack, key=lambda x: x.position)
 
-        max_redirects = 3
+        max_redirects = 5
         cur_attempt = 0
 
         while cur_attempt < max_redirects:
@@ -250,15 +250,11 @@ class ClusterPipeline(RedisCluster):
             # so that we can read them all in parallel as they come back.
             # we dont' multiplex on the sockets as they come available, but that shouldn't make too much difference.
             node_commands = nodes.values()
-            # events = []
+            events = []
             for n in node_commands:
-                # events.append(gevent.spawn(self._execute_node_commands, n))
-                n.write()
+                events.append(gevent.spawn(self._execute_node_commands, n))
 
-            for n in node_commands:
-                n.read()
-
-            #gevent.joinall(events)
+            gevent.joinall(events)
 
             # release all of the redis connections we allocated earlier back into the connection pool.
             # we used to do this step as part of a try/finally block, but it is really dangerous to
@@ -288,43 +284,41 @@ class ClusterPipeline(RedisCluster):
                 cmds = sorted(moved_cmds, key=lambda x: x.position)
                 continue
 
-            # if the response isn't an exception it is a valid response from the node
-            # we're all done with that command, YAY!
-            # if we have more commands to attempt, we've run into problems.
-            # collect all the commands we are allowed to retry.
-            # (MOVED, ASK, or connection errors or timeout errors)
-            attempt = sorted([c for c in stack if isinstance(c.result, ERRORS_ALLOW_RETRY)], key=lambda x: x.position)
-            if attempt and allow_redirections:
-                # RETRY MAGIC HAPPENS HERE!
-                # send these remaing comamnds one at a time using `execute_command`
-                # in the main client. This keeps our retry logic in one place mostly,
-                # and allows us to be more confident in correctness of behavior.
-                # at this point any speed gains from pipelining have been lost
-                # anyway, so we might as well make the best attempt to get the correct
-                # behavior.
-                #
-                # The client command will handle retries for each individual command
-                # sequentially as we pass each one into `execute_command`. Any exceptions
-                # that bubble out should only appear once all retries have been exhausted.
-                #
-                # If a lot of commands have failed, we'll be setting the
-                # flag to rebuild the slots table from scratch. So MOVED errors should
-                # correct themselves fairly quickly.
-
-                log.info("pipeline in slow mode to execute failed commands: {}".format([c.result for c in attempt]))
-
-                self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
-                # events = []
-                for c in attempt:
-                    try:
-                        # send each command individually like we do in the main client.
-                        c.result = super(ClusterPipeline, self).execute_command(*c.args, **c.options)
-                    except RedisError as e:
-                        c.result = e
-                    # events.append(gevent.spawn(self._execute_single_command, c))
-                # gevent.joinall(events)
-
             break
+
+        # if the response isn't an exception it is a valid response from the node
+        # we're all done with that command, YAY!
+        # if we have more commands to attempt, we've run into problems.
+        # collect all the commands we are allowed to retry.
+        # (MOVED, ASK, or connection errors or timeout errors)
+        attempt = sorted([c for c in stack if isinstance(c.result, ERRORS_ALLOW_RETRY)], key=lambda x: x.position)
+        if attempt and allow_redirections:
+            # RETRY MAGIC HAPPENS HERE!
+            # send these remaing comamnds one at a time using `execute_command`
+            # in the main client. This keeps our retry logic in one place mostly,
+            # and allows us to be more confident in correctness of behavior.
+            # at this point any speed gains from pipelining have been lost
+            # anyway, so we might as well make the best attempt to get the correct
+            # behavior.
+            #
+            # The client command will handle retries for each individual command
+            # sequentially as we pass each one into `execute_command`. Any exceptions
+            # that bubble out should only appear once all retries have been exhausted.
+            #
+            # If a lot of commands have failed, we'll be setting the
+            # flag to rebuild the slots table from scratch. So MOVED errors should
+            # correct themselves fairly quickly.
+
+            log.info("pipeline in slow mode to execute failed commands: {}".format([c.result for c in attempt]))
+
+            self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
+            events = []
+
+            for c in attempt:
+                events.append(gevent.spawn(self._execute_single_command, c))
+
+            gevent.joinall(events)
+
 
         # turn the response back into a simple flat array that corresponds
         # to the sequence of commands issued in the stack in pipeline.execute()
