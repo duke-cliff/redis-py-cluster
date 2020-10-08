@@ -973,17 +973,17 @@ class RedisCluster(Redis):
                 for r in resp:
                     yield r
 
-    def mget(self, keys, *args):
-        """
-        Returns a list of values ordered identically to ``keys``
-
-        Cluster impl:
-            Itterate all keys and send GET for each key.
-            This will go alot slower than a normal mget call in Redis.
-
-            Operation is no longer atomic.
-        """
-        return [self.get(arg) for arg in list_or_args(keys, args)]
+    # def mget(self, keys, *args):
+    #     """
+    #     Returns a list of values ordered identically to ``keys``
+    #
+    #     Cluster impl:
+    #         Itterate all keys and send GET for each key.
+    #         This will go alot slower than a normal mget call in Redis.
+    #
+    #         Operation is no longer atomic.
+    #     """
+    #     return [self.get(arg) for arg in list_or_args(keys, args)]
 
     def mset(self, *args, **kwargs):
         """
