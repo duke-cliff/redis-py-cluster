@@ -2,6 +2,7 @@
 
 # python std lib
 import sys
+import logging
 
 # rediscluster imports
 from .client import RedisCluster
@@ -15,6 +16,10 @@ from redis import Redis
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
 from redis._compat import imap, unicode
 
+from gevent import monkey; monkey.patch_all()
+import gevent
+
+log = logging.getLogger(__name__)
 
 ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, MovedError, AskError, TryAgainError)
 
@@ -174,6 +179,11 @@ class ClusterPipeline(RedisCluster):
         # If it fails the configured number of times then raise exception back to caller of this method
         raise ClusterDownError("CLUSTERDOWN error. Unable to rebuild the cluster")
 
+    def _execute_node_commands(self, n):
+        n.write()
+
+        n.read()
+
     def _send_cluster_commands(self, stack, raise_on_error=True, allow_redirections=True):
         """
         Send a bunch of cluster commands to the redis cluster.
@@ -227,11 +237,11 @@ class ClusterPipeline(RedisCluster):
         # so that we can read them all in parallel as they come back.
         # we dont' multiplex on the sockets as they come available, but that shouldn't make too much difference.
         node_commands = nodes.values()
+        events = []
         for n in node_commands:
-            n.write()
+            events.append(gevent.spawn(self._execute_node_commands, n))
 
-        for n in node_commands:
-            n.read()
+        gevent.joinall(events)
 
         # release all of the redis connections we allocated earlier back into the connection pool.
         # we used to do this step as part of a try/finally block, but it is really dangerous to
@@ -269,6 +279,8 @@ class ClusterPipeline(RedisCluster):
             # If a lot of commands have failed, we'll be setting the
             # flag to rebuild the slots table from scratch. So MOVED errors should
             # correct themselves fairly quickly.
+
+            log.debug("pipeline has failed commands: {}".format(attempt))
             self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
             for c in attempt:
                 try:
