@@ -203,6 +203,7 @@ class ClusterPipeline(RedisCluster):
                 node = proxy_node_by_master[master_node['name']]
             else:
                 node = self.connection_pool.get_node_by_slot(slot, self.read_from_replicas)
+                log.debug("get proxy node {} for read_from_replicas: {}".format(node['name'], self.read_from_replicas))
                 proxy_node_by_master[master_node['name']] = node
 
                 # little hack to make sure the node name is populated. probably could clean this up.
