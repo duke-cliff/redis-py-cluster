@@ -234,67 +234,89 @@ class ClusterPipeline(RedisCluster):
         """
         # the first time sending the commands we send all of the commands that were queued up.
         # if we have to run through it again, we only retry the commands that failed.
-        attempt = sorted(stack, key=lambda x: x.position)
+        cmds = sorted(stack, key=lambda x: x.position)
 
-        # build a list of node objects based on node names we need to
-        nodes, connection_by_node = self._get_commands_by_node(attempt)
+        max_redirects = 3
+        cur_attempt = 0
 
-        # send the commands in sequence.
-        # we  write to all the open sockets for each node first, before reading anything
-        # this allows us to flush all the requests out across the network essentially in parallel
-        # so that we can read them all in parallel as they come back.
-        # we dont' multiplex on the sockets as they come available, but that shouldn't make too much difference.
-        node_commands = nodes.values()
-        events = []
-        for n in node_commands:
-            events.append(gevent.spawn(self._execute_node_commands, n))
+        while cur_attempt < max_redirects:
 
-        gevent.joinall(events)
+            # build a list of node objects based on node names we need to
+            nodes, connection_by_node = self._get_commands_by_node(cmds)
 
-        # release all of the redis connections we allocated earlier back into the connection pool.
-        # we used to do this step as part of a try/finally block, but it is really dangerous to
-        # release connections back into the pool if for some reason the socket has data still left in it
-        # from a previous operation. The write and read operations already have try/catch around them for
-        # all known types of errors including connection and socket level errors.
-        # So if we hit an exception, something really bad happened and putting any of
-        # these connections back into the pool is a very bad idea.
-        # the socket might have unread buffer still sitting in it, and then the
-        # next time we read from it we pass the buffered result back from a previous
-        # command and every single request after to that connection will always get
-        # a mismatched result. (not just theoretical, I saw this happen on production x.x).
-        for conn in connection_by_node.values():
-            self.connection_pool.release(conn)
-
-        # if the response isn't an exception it is a valid response from the node
-        # we're all done with that command, YAY!
-        # if we have more commands to attempt, we've run into problems.
-        # collect all the commands we are allowed to retry.
-        # (MOVED, ASK, or connection errors or timeout errors)
-        attempt = sorted([c for c in attempt if isinstance(c.result, ERRORS_ALLOW_RETRY)], key=lambda x: x.position)
-        if attempt and allow_redirections:
-            # RETRY MAGIC HAPPENS HERE!
-            # send these remaing comamnds one at a time using `execute_command`
-            # in the main client. This keeps our retry logic in one place mostly,
-            # and allows us to be more confident in correctness of behavior.
-            # at this point any speed gains from pipelining have been lost
-            # anyway, so we might as well make the best attempt to get the correct
-            # behavior.
-            #
-            # The client command will handle retries for each individual command
-            # sequentially as we pass each one into `execute_command`. Any exceptions
-            # that bubble out should only appear once all retries have been exhausted.
-            #
-            # If a lot of commands have failed, we'll be setting the
-            # flag to rebuild the slots table from scratch. So MOVED errors should
-            # correct themselves fairly quickly.
-
-            log.debug("pipeline has failed commands: {}".format([c.result for c in attempt]))
-
-            self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
+            # send the commands in sequence.
+            # we  write to all the open sockets for each node first, before reading anything
+            # this allows us to flush all the requests out across the network essentially in parallel
+            # so that we can read them all in parallel as they come back.
+            # we dont' multiplex on the sockets as they come available, but that shouldn't make too much difference.
+            node_commands = nodes.values()
             events = []
-            for c in attempt:
-                events.append(gevent.spawn(self._execute_single_command, c))
+            for n in node_commands:
+                events.append(gevent.spawn(self._execute_node_commands, n))
+
             gevent.joinall(events)
+
+            # release all of the redis connections we allocated earlier back into the connection pool.
+            # we used to do this step as part of a try/finally block, but it is really dangerous to
+            # release connections back into the pool if for some reason the socket has data still left in it
+            # from a previous operation. The write and read operations already have try/catch around them for
+            # all known types of errors including connection and socket level errors.
+            # So if we hit an exception, something really bad happened and putting any of
+            # these connections back into the pool is a very bad idea.
+            # the socket might have unread buffer still sitting in it, and then the
+            # next time we read from it we pass the buffered result back from a previous
+            # command and every single request after to that connection will always get
+            # a mismatched result. (not just theoretical, I saw this happen on production x.x).
+            for conn in connection_by_node.values():
+                self.connection_pool.release(conn)
+
+            moved_cmds = []
+            for c in cmds:
+                if isinstance(c.result, MovedError):
+                    e = c.result
+                    node = self.connection_pool.nodes.get_node(e.host, e.port, server_type='master')
+                    self.connection_pool.nodes.move_slot_to_node(e.slot_id, node)
+
+                    moved_cmds.append(c)
+
+            if moved_cmds:
+                cur_attempt += 1
+                cmds = sorted(moved_cmds, key=lambda x: x.position)
+                continue
+
+            # if the response isn't an exception it is a valid response from the node
+            # we're all done with that command, YAY!
+            # if we have more commands to attempt, we've run into problems.
+            # collect all the commands we are allowed to retry.
+            # (MOVED, ASK, or connection errors or timeout errors)
+            attempt = sorted([c for c in stack if isinstance(c.result, ERRORS_ALLOW_RETRY)], key=lambda x: x.position)
+            if attempt and allow_redirections:
+                # RETRY MAGIC HAPPENS HERE!
+                # send these remaing comamnds one at a time using `execute_command`
+                # in the main client. This keeps our retry logic in one place mostly,
+                # and allows us to be more confident in correctness of behavior.
+                # at this point any speed gains from pipelining have been lost
+                # anyway, so we might as well make the best attempt to get the correct
+                # behavior.
+                #
+                # The client command will handle retries for each individual command
+                # sequentially as we pass each one into `execute_command`. Any exceptions
+                # that bubble out should only appear once all retries have been exhausted.
+                #
+                # If a lot of commands have failed, we'll be setting the
+                # flag to rebuild the slots table from scratch. So MOVED errors should
+                # correct themselves fairly quickly.
+
+                log.debug("pipeline has failed commands: {}".format([c.result for c in attempt]))
+
+                self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
+                events = []
+                for c in attempt:
+                    events.append(gevent.spawn(self._execute_single_command, c))
+                gevent.joinall(events)
+                break
+            else:
+                break
 
         # turn the response back into a simple flat array that corresponds
         # to the sequence of commands issued in the stack in pipeline.execute()
