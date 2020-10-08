@@ -184,25 +184,12 @@ class ClusterPipeline(RedisCluster):
 
         n.read()
 
-    def _send_cluster_commands(self, stack, raise_on_error=True, allow_redirections=True):
-        """
-        Send a bunch of cluster commands to the redis cluster.
-
-        `allow_redirections` If the pipeline should follow `ASK` & `MOVED` responses
-        automatically. If set to false it will raise RedisClusterException.
-        """
-        # the first time sending the commands we send all of the commands that were queued up.
-        # if we have to run through it again, we only retry the commands that failed.
-        attempt = sorted(stack, key=lambda x: x.position)
-
-        # build a list of node objects based on node names we need to
+    def _get_commands_by_node(self, cmds):
         nodes = {}
         proxy_node_by_master = {}
         connection_by_node = {}
 
-        # as we move through each command that still needs to be processed,
-        # we figure out the slot number that command maps to, then from the slot determine the node.
-        for c in attempt:
+        for c in cmds:
             # refer to our internal node -> slot table that tells us where a given
             # command should route to.
             slot = self._determine_slot(*c.args)
@@ -218,8 +205,6 @@ class ClusterPipeline(RedisCluster):
                 # little hack to make sure the node name is populated. probably could clean this up.
                 self.connection_pool.nodes.set_node_name(node)
 
-            # now that we know the name of the node ( it's just a string in the form of host:port )
-            # we can build a list of commands for each node.
             node_name = node['name']
             if node_name not in nodes:
                 if node_name in connection_by_node:
@@ -230,6 +215,29 @@ class ClusterPipeline(RedisCluster):
                 nodes[node_name] = NodeCommands(self.parse_response, connection)
 
             nodes[node_name].append(c)
+
+        return nodes
+
+    def _execute_single_command(self, cmd):
+        try:
+            # send each command individually like we do in the main client.
+            cmd.result = super(ClusterPipeline, self).execute_command(*cmd.args, **cmd.options)
+        except RedisError as e:
+            cmd.result = e
+
+    def _send_cluster_commands(self, stack, raise_on_error=True, allow_redirections=True):
+        """
+        Send a bunch of cluster commands to the redis cluster.
+
+        `allow_redirections` If the pipeline should follow `ASK` & `MOVED` responses
+        automatically. If set to false it will raise RedisClusterException.
+        """
+        # the first time sending the commands we send all of the commands that were queued up.
+        # if we have to run through it again, we only retry the commands that failed.
+        attempt = sorted(stack, key=lambda x: x.position)
+
+        # build a list of node objects based on node names we need to
+        nodes = self._get_commands_by_node(attempt)
 
         # send the commands in sequence.
         # we  write to all the open sockets for each node first, before reading anything
@@ -280,14 +288,13 @@ class ClusterPipeline(RedisCluster):
             # flag to rebuild the slots table from scratch. So MOVED errors should
             # correct themselves fairly quickly.
 
-            log.debug("pipeline has failed commands: {}".format(attempt))
+            log.debug("pipeline has failed commands: {}".format([c.result for c in attempt]))
+
             self.connection_pool.nodes.increment_reinitialize_counter(len(attempt))
+            events = []
             for c in attempt:
-                try:
-                    # send each command individually like we do in the main client.
-                    c.result = super(ClusterPipeline, self).execute_command(*c.args, **c.options)
-                except RedisError as e:
-                    c.result = e
+                events.append(gevent.spawn(self._execute_single_command, c))
+            gevent.joinall(events)
 
         # turn the response back into a simple flat array that corresponds
         # to the sequence of commands issued in the stack in pipeline.execute()
