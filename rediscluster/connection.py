@@ -256,6 +256,20 @@ class ClusterConnectionPool(ConnectionPool):
 
         return connection
 
+    def drop_connection(self, node, connection):
+        """
+        The connection is unusable right after make_connection
+        We need to drop this connection and recreate a new one
+        """
+        try:
+            connection.close()
+        except Exception:
+            log.exception("drop connection is failed for {}".format(node))
+        finally:
+            self._created_connections_per_node[node['name']] -= 1
+            if self._created_connections_per_node[node['name']] < 0:
+                self._created_connections_per_node[node['name']] = 0
+
     def release(self, connection):
         """
         Releases the connection back to the pool
@@ -345,9 +359,15 @@ class ClusterConnectionPool(ConnectionPool):
             connection = self.make_connection(node)
             server_type = node.get("server_type", "master")
             if server_type == "slave":
-                connection.send_command('READONLY')
-                if nativestr(connection.read_response()) != 'OK':
-                    raise ConnectionError('READONLY command failed')
+                try:
+                    connection.send_command('READONLY')
+                    if nativestr(connection.read_response()) != 'OK':
+                        raise ConnectionError('READONLY command failed')
+                except Exception:
+                    # if we catch any exception here, the connection is not usable
+                    log.exception("send_command readonly has error")
+                    self.drop_connection(node, connection)
+                    raise ConnectionError('Connection is unusable')
 
         self._in_use_connections.setdefault(node["name"], set()).add(connection)
 

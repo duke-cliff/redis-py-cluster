@@ -585,6 +585,7 @@ class RedisCluster(Redis):
         ttl = int(self.RedisClusterRequestTTL)
         connection_error_retry_counter = 0
 
+        connection = None
         while ttl > 0:
             ttl -= 1
 
@@ -634,8 +635,8 @@ class RedisCluster(Redis):
                 raise
             except ConnectionError as e:
                 log.exception("ConnectionError")
-
-                connection.disconnect()
+                if connection:
+                    self.connection_pool.drop_connection(node, connection)
                 connection_error_retry_counter += 1
 
                 # Give the node 0.1 seconds to get back up and retry again with same
@@ -691,8 +692,11 @@ class RedisCluster(Redis):
                 log.exception("AskError")
 
                 redirect_addr, asking = "{0}:{1}".format(e.host, e.port), True
+            except Exception:
+                log.exception("OtherException")
             finally:
-                self.connection_pool.release(connection)
+                if connection:
+                    self.connection_pool.release(connection)
 
             log.debug("TTL loop : " + str(ttl))
 
