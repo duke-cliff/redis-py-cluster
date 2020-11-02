@@ -143,6 +143,9 @@ class ClusterConnectionPool(ConnectionPool):
         self.max_connections = max_connections or 2 ** 31
         self.max_connections_per_node = max_connections_per_node
 
+        # check if we need to remove excessive connections every x requests
+        self.clean_connection_check_count = 500
+
         if connection_class == SSLClusterConnection:
             connection_kwargs['ssl'] = True  # needed in Redis init
 
@@ -191,6 +194,8 @@ class ClusterConnectionPool(ConnectionPool):
         self._created_connections_per_node = {}  # Dict(Node, Int)
         self._available_connections = {}  # Dict(Node, List)
         self._in_use_connections = {}  # Dict(Node, Set)
+        self._max_in_use_connections = {}
+        self._clean_connection_sample_count = {}
         self._check_lock = threading.Lock()
 
     def _checkpid(self):
@@ -351,10 +356,11 @@ class ClusterConnectionPool(ConnectionPool):
         """
         self._checkpid()
         self.nodes.set_node_name(node)
+        node_name = node["name"]
 
         try:
             # Try to get connection from existing pool
-            connection = self._available_connections.get(node["name"], []).pop()
+            connection = self._available_connections.get(node_name, []).pop()
         except IndexError:
             connection = self.make_connection(node)
             server_type = node.get("server_type", "master")
@@ -369,8 +375,37 @@ class ClusterConnectionPool(ConnectionPool):
                     self.drop_connection(node, connection)
                     raise ConnectionError('Connection is unusable')
 
-        self._in_use_connections.setdefault(node["name"], set()).add(connection)
+        self._in_use_connections.setdefault(node_name, set()).add(connection)
 
+        # add logic to drop connections if the available pool is 2x larger than it's actually needed.
+        # The pool might be increased due to temporary network/performance issue, and we should have a way to
+        # shrink it down once the network/performance becomes stable.
+        try:
+            in_use_size = len(self._in_use_connections.get(node_name))
+            if node_name in self._clean_connection_sample_count:
+                self._clean_connection_sample_count[node_name] += 1
+            else:
+                self._clean_connection_sample_count[node_name] = 1
+
+            if node_name in self._max_in_use_connections:
+                if in_use_size > self._max_in_use_connections[node_name]:
+                    self._clean_connection_sample_count[node_name] = in_use_size
+            else:
+                self._clean_connection_sample_count[node_name] = in_use_size
+
+            if self._clean_connection_sample_count[node_name] >= self.clean_connection_check_count:
+                available_size = len(self._available_connections.get(node_name, []))
+                used_size = self._max_in_use_connections[node_name]
+                if available_size >= used_size * 2 and used_size > 0:
+                    # drop half of the connection
+                    for i in range(available_size/2):
+                        dropping_conn = self._available_connections.get(node_name, []).pop()
+                        self.drop_connection(node, dropping_conn)
+
+                self._clean_connection_sample_count[node_name] = 0
+                self._max_in_use_connections[node_name] = 0
+        except Exception:
+            log.exception("clean db connections has error")
         return connection
 
     def get_master_node_by_slot(self, slot):
