@@ -204,9 +204,9 @@ class NodeManager(object):
         """
         Init the slots cache by asking all startup nodes what the current cluster configuration is
         """
-        log.debug("Running initialize on NodeManager")
+        log.info("Running initialize on NodeManager")
         log.debug("Original startup nodes configuration")
-        log.debug(json.dumps(self.orig_startup_nodes, indent=2))
+        log.info(json.dumps(self.orig_startup_nodes, indent=2))
 
         nodes_cache = {}
         tmp_slots = {}
@@ -217,7 +217,10 @@ class NodeManager(object):
 
         nodes = self.orig_startup_nodes
 
-        # With this option the client will attempt to connect to any of the previous set of nodes instead of the original set of nodes
+        # With this option the client will attempt to connect to any of the previous set of nodes instead of the
+        # original set of nodes
+        log.info("nodemanager_follow_cluster: {}".format(self.nodemanager_follow_cluster))
+        log.info("_skip_full_coverage_check: {}".format(self._skip_full_coverage_check))
         if self.nodemanager_follow_cluster:
             nodes = self.startup_nodes
 
@@ -310,8 +313,8 @@ class NodeManager(object):
         self.nodes = nodes_cache
         self.reinitialize_counter = 0
 
-        log.debug("NodeManager initialize done : Nodes")
-        log.debug(json.dumps(self.nodes, indent=2))
+        log.info("NodeManager initialize done : Nodes")
+        log.info(json.dumps(self.nodes, indent=2))
 
     def remap_internal_node_object(self, node_obj):
         if not self.host_port_remap:

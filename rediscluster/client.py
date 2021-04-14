@@ -570,6 +570,7 @@ class RedisCluster(Redis):
 
         # If set externally we must update it before calling any commands
         if self.refresh_table_asap:
+            log.info("reinitialize connection_pool")
             self.connection_pool.nodes.initialize()
             self.refresh_table_asap = False
 
@@ -678,11 +679,11 @@ class RedisCluster(Redis):
                 # can set the variable 'reinitialize_steps' in the constructor.
                 log.exception("MovedError")
 
-                self.refresh_table_asap = True
-                self.connection_pool.nodes.increment_reinitialize_counter()
-
                 node = self.connection_pool.nodes.get_node(e.host, e.port, server_type='master')
                 self.connection_pool.nodes.move_slot_to_node(e.slot_id, node)
+
+                # self.refresh_table_asap = True
+                self.connection_pool.nodes.increment_reinitialize_counter()
             except TryAgainError as e:
                 log.exception("TryAgainError")
 
