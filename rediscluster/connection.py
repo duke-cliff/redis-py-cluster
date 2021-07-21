@@ -262,7 +262,7 @@ class ClusterConnectionPool(ConnectionPool):
         We need to drop this connection and recreate a new one
         """
         try:
-            connection.close()
+            connection.disconnect()
         except Exception:
             log.exception("drop connection is failed for {}".format(node))
         finally:
